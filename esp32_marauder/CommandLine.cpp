@@ -37,6 +37,10 @@ void CommandLine::main(uint32_t currentTime) {
     Serial.print("> ");
 }
 
+void CommandLine::executeCommand(String cmd) {
+  this->runCommand(cmd);
+}
+
 LinkedList<String> CommandLine::parseCommand(String input, char* delim) {
   LinkedList<String> cmd_args;
 

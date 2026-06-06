@@ -55,18 +55,19 @@ GitHub Actions (`.github/workflows/build_parallel.yml`) compiles all 20+ targets
 
 ### Main loop structure (`esp32_marauder.ino`)
 
-`setup()` initializes all subsystems in order: serial → display → GPS → settings (SPIFFS) → WiFiScan → EvilPortal → Buffer → CommandLine.
+`setup()` initializes all subsystems in order: serial → display → GPS → settings (SPIFFS) → WiFiScan → EvilPortal → **RemoteServer** → Battery → LED → GPS → MenuFunctions → CommandLine.
 
 `loop()` calls `.main(currentTime)` on each subsystem every iteration (~1000 Hz with display, ~20 Hz headless):
 
 ```
-cli_obj.main()           → parse & execute serial commands
-wifi_scan_obj.main()     → core WiFi/BT engine (scanning, attacks, captures)
-gps_obj.main()           → read NMEA from UART
-buffer_obj.save()        → flush PCAP frames to SD card
-battery_obj.main()       → ADC battery level
-menu_function_obj.main() → TFT display rendering & button input
-led_obj.main()           → NeoPixel/LED state
+cli_obj.main()              → parse & execute serial commands
+remote_server_obj.main()    → restore AP after scan stops
+wifi_scan_obj.main()        → core WiFi/BT engine (scanning, attacks, captures)
+gps_obj.main()              → read NMEA from UART
+buffer_obj.save()           → flush PCAP frames to SD card
+battery_obj.main()          → ADC battery level
+menu_function_obj.main()    → TFT display rendering & button input
+led_obj.main()              → NeoPixel/LED state
 ```
 
 ### Module responsibilities
@@ -74,6 +75,7 @@ led_obj.main()           → NeoPixel/LED state
 | Module | Files | Role |
 |--------|-------|------|
 | **WiFiScan** | `WiFiScan.cpp/h` (~10K lines) | Core engine: promiscuous capture, frame injection, BLE scanning/spoofing, all scan/attack state machines |
+| **RemoteServer** | `RemoteServer.cpp/h` | WiFi AP + REST API on port 8080; bridges CLI commands to HTTP clients |
 | **MenuFunctions** | `MenuFunctions.cpp/h` | TFT menu tree rendering, button/touch input, calls into WiFiScan on user action |
 | **CommandLine** | `CommandLine.cpp/h` | Serial CLI: parses text commands, maps to WiFiScan/Settings methods |
 | **Display** | `Display.cpp/h` | Low-level TFT draw primitives used by MenuFunctions |
@@ -111,6 +113,30 @@ Settings::saveSetting<String>("ClientSSID", value);
 ```
 
 Settings are lazy-loaded from SPIFFS JSON on first access and cached. `JSON_SETTING_SIZE` (2048 bytes) in `configs.h` controls the JSON document size.
+
+### RemoteServer — WiFi AP + REST API
+
+`RemoteServer` starts a WPA2 soft-AP on boot and runs an `AsyncWebServer` on port **8080**. Credentials and the API token are stored in NVS via `Preferences` (namespace `remote_ap`; keys `ssid`, `pw`, `token`). Defaults: SSID=`MarauderAP`, PW=`marauder1`, token=`marauder`.
+
+All REST endpoints require the header `X-API-Key: <token>`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/status` | Current scan mode, scanning flag, AP clients, free heap |
+| GET | `/api/aps` | Discovered access points (up to 15) |
+| GET | `/api/stations` | Associated stations (up to 15) |
+| GET | `/api/ssids` | Custom SSID list used for beacon/probe attacks |
+| GET | `/api/probes` | Captured probe-request SSIDs |
+| POST | `/api/cmd` | Execute any CLI command — body: `{"cmd": "sniffbeacon"}` |
+| POST | `/api/stopscan` | Stop the current scan/attack |
+| GET | `/api/apconfig` | Read stored AP SSID and password |
+| POST | `/api/apconfig` | Update AP SSID/password/token — body: `{"ssid":"…","pw":"…","token":"…"}` |
+
+**Single-radio constraint**: The ESP32 has one WiFi radio. When WiFiScan starts any scan or attack it takes full control of the radio, disrupting the AP. The AP is automatically restored in `RemoteServer::main()` once the scan mode returns to `WIFI_SCAN_OFF` and the radio is released (`wifi_scan_obj.wifi_initialized == false`). There is a 5-second cooldown between restart attempts.
+
+**EvilPortal conflict**: EvilPortal (`WIFI_SCAN_EVIL_PORTAL`) creates its own AP and overwrites RemoteServer's. This is expected — EvilPortal and RemoteServer cannot run simultaneously because the ESP32 supports only one soft-AP.
+
+**Credential persistence**: RemoteServer stores its own credentials in NVS (Preferences), separate from the existing SPIFFS-based Settings JSON. Do not add RemoteServer keys to the Settings class.
 
 ## Conventions
 

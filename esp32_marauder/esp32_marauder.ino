@@ -37,6 +37,7 @@ https://www.online-utility.org/image/convert/to/XBM
 
 #include "settings.h"
 #include "CommandLine.h"
+#include "RemoteServer.h"
 #include "lang_var.h"
 
 #ifdef HAS_BATTERY
@@ -74,6 +75,7 @@ EvilPortal evil_portal_obj;
 Buffer buffer_obj;
 Settings settings_obj;
 CommandLine cli_obj;
+RemoteServer remote_server_obj;
 
 #ifdef HAS_GPS
   GpsInterface gps_obj;
@@ -367,6 +369,7 @@ void setup()
   #endif
 
   evil_portal_obj.setup();
+  remote_server_obj.RunSetup();
 
   #ifdef HAS_BATTERY
     battery_obj.RunSetup();
@@ -447,6 +450,7 @@ void loop()
 
   // Update all of our objects
   cli_obj.main(currentTime);
+  remote_server_obj.main(currentTime);
   wifi_scan_obj.main(currentTime);
 
   #ifdef HAS_GPS

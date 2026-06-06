@@ -247,6 +247,7 @@ class CommandLine {
 
     void RunSetup();
     void main(uint32_t currentTime);
+    void executeCommand(String cmd);
 };
 
 #endif
